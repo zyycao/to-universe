@@ -1,1 +1,43 @@
-
+{
+  "name": "xui-manager",
+  "version": "1.0.0",
+  "description": "X-UI统一管理面板 - 多服务器集中管理工具",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "keywords": [
+    "x-ui",
+    "xray",
+    "v2ray",
+    "trojan",
+    "proxy",
+    "management",
+    "panel"
+  ],
+  "author": "你的名字",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/你的用户名/xui-manager.git"
+  },
+  "bugs": {
+    "url": "https://github.com/你的用户名/xui-manager/issues"
+  },
+  "homepage": "https://github.com/你的用户名/xui-manager#readme",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "axios": "^1.6.0",
+    "sqlite3": "^5.1.6",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}
