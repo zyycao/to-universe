@@ -100,7 +100,7 @@ install_git() {
 
 clone_project() {
     INSTALL_DIR="/opt/xui-manager"
-    GITHUB_REPO="https://github.com/你的用户名/xui-manager.git"
+    GITHUB_REPO="https://github.com/zyycao/to-universe.git"
     
     print_info "开始下载项目..."
     
