@@ -287,8 +287,9 @@ app.get('/api/xui/server/:id/inbounds', authenticateToken, async (req, res) => {
       }
 
       const baseUrl = `http://${server.host}:${server.port}${server.web_base_path || ''}`;
-      const response = await axios.get(
-        `${baseUrl}/xui/inbounds`,
+      const response = await axios.post(
+        `${baseUrl}/xui/inbound/list`,
+        {},
         {
           headers: { Cookie: sessionCookie },
           httpsAgent,
@@ -322,7 +323,7 @@ app.post('/api/xui/server/:id/inbounds', authenticateToken, async (req, res) => 
 
       const baseUrl = `http://${server.host}:${server.port}${server.web_base_path || ''}`;
       const response = await axios.post(
-        `${baseUrl}/xui/inbounds/add`,
+        `${baseUrl}/xui/inbound/add`,
         inboundData,
         {
           headers: { Cookie: sessionCookie },
@@ -357,7 +358,7 @@ app.post('/api/xui/server/:id/inbounds/:inboundId', authenticateToken, async (re
 
       const baseUrl = `http://${server.host}:${server.port}${server.web_base_path || ''}`;
       const response = await axios.post(
-        `${baseUrl}/xui/inbounds/update/${inboundId}`,
+        `${baseUrl}/xui/inbound/update/${inboundId}`,
         inboundData,
         {
           headers: { Cookie: sessionCookie },
@@ -391,7 +392,7 @@ app.post('/api/xui/server/:id/inbounds/del/:inboundId', authenticateToken, async
 
       const baseUrl = `http://${server.host}:${server.port}${server.web_base_path || ''}`;
       const response = await axios.post(
-        `${baseUrl}/xui/inbounds/del/${inboundId}`,
+        `${baseUrl}/xui/inbound/del/${inboundId}`,
         {},
         {
           headers: { Cookie: sessionCookie },
@@ -461,8 +462,9 @@ app.get('/api/xui/all-servers/inbounds', authenticateToken, async (req, res) => 
           }
 
           const baseUrl = `http://${server.host}:${server.port}${server.web_base_path || ''}`;
-          const response = await axios.get(
-            `${baseUrl}/xui/inbounds`,
+          const response = await axios.post(
+            `${baseUrl}/xui/inbound/list`,
+            {},
             {
               headers: { Cookie: sessionCookie },
               httpsAgent,
