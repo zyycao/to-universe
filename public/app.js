@@ -1,4 +1,3 @@
-'ENDFILE'
 const { useState, useEffect } = React;
 const API_BASE_URL = window.location.origin + '/api';
 
@@ -119,6 +118,7 @@ const XUIManager = () => {
         setServerStatus(prev => ({ ...prev, [serverId]: { online: false } }));
       }
     } catch (error) {
+      console.error('获取服务器状态失败:', error);
       setServerStatus(prev => ({ ...prev, [serverId]: { online: false } }));
     } finally {
       setLoading(prev => ({ ...prev, [serverId]: false }));
@@ -174,7 +174,7 @@ const XUIManager = () => {
   }, [token]);
 
   const formatBytes = (bytes) => {
-    if (!bytes) return '0 B';
+    if (!bytes || isNaN(bytes)) return '0 B';
     const k = 1024;
     const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
@@ -182,10 +182,15 @@ const XUIManager = () => {
   };
 
   const formatUptime = (seconds) => {
-    if (!seconds) return '0天 0小时';
+    if (!seconds || isNaN(seconds)) return '0天 0小时';
     const days = Math.floor(seconds / 86400);
     const hours = Math.floor((seconds % 86400) / 3600);
     return `${days}天 ${hours}小时`;
+  };
+
+  const safeNumber = (val) => {
+    const num = parseFloat(val);
+    return isNaN(num) ? 0 : num;
   };
 
   if (!token) {
@@ -243,12 +248,12 @@ const XUIManager = () => {
           React.createElement('div', { key: k },
             React.createElement('div', { className: "flex items-center justify-between" },
               React.createElement('span', { className: "text-sm text-gray-600" }, l),
-              React.createElement('span', { className: "text-sm font-medium" }, `${(status[k] || 0).toFixed(1)}%`)
+              React.createElement('span', { className: "text-sm font-medium" }, `${safeNumber(status[k]).toFixed(1)}%`)
             ),
             React.createElement('div', { className: "w-full bg-gray-200 rounded-full h-2" },
               React.createElement('div', {
                 className: `h-2 rounded-full bg-${c}-600`,
-                style: { width: `${status[k] || 0}%` }
+                style: { width: `${safeNumber(status[k])}%` }
               })
             )
           )
@@ -357,4 +362,3 @@ const XUIManager = () => {
 };
 
 ReactDOM.render(React.createElement(XUIManager), document.getElementById('root'));
-ENDFILE
