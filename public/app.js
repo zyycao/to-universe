@@ -11,21 +11,262 @@ const XUIManager = () => {
   const [inbounds, setInbounds] = useState({});
   const [loading, setLoading] = useState({});
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [expandedServers, setExpandedServers] = useState({});
+  const [showQRCode, setShowQRCode] = useState(false);
+  const [qrCodeData, setQRCodeData] = useState({ title: '', content: '' });
   const [newServer, setNewServer] = useState({
     name: '', host: '', port: '', username: '', password: '', webBasePath: ''
   });
   const [showInboundModal, setShowInboundModal] = useState(false);
   const [editingInbound, setEditingInbound] = useState(null);
   const [currentServerId, setCurrentServerId] = useState(null);
+  
+  // 入站表单状态
   const [inboundForm, setInboundForm] = useState({
     remark: '',
-    protocol: 'vmess',
-    port: '',
     enable: true,
-    settings: '',
-    streamSettings: '',
-    sniffing: '{"enabled":true,"destOverride":["http","tls"]}'
+    protocol: 'vmess',
+    listen: '',
+    port: '',
+    totalGB: 0,
+    expiryTime: '',
+    id: '',
+    alterId: 0,
+    flow: '',
+    password: '',
+    fallbacks: [],
+    method: 'aes-256-gcm',
+    ssPassword: '',
+    address: '',
+    targetPort: '',
+    network: 'tcp,udp',
+    authUser: '',
+    authPass: '',
+    udp: false,
+    ip: '',
+    streamNetwork: 'tcp',
+    security: 'none',
+    serverName: '',
+    certFile: '',
+    keyFile: '',
+    certContent: '',
+    keyContent: '',
+    useCertFile: true,
+    tcpHeaderType: 'none',
+    wsPath: '/',
+    wsHost: '',
+    h2Path: '/',
+    h2Host: '',
+    grpcServiceName: '',
+    kcpSeed: '',
+    kcpType: 'none',
+    quicSecurity: 'none',
+    quicKey: '',
+    quicType: 'none',
+    sniffing: true
   });
+
+  const generateUUID = () => {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+      var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+  };
+
+  const toggleServer = (serverId) => {
+    setExpandedServers(prev => ({
+      ...prev,
+      [serverId]: !prev[serverId]
+    }));
+    
+    // 如果展开且还没加载数据，则加载
+    if (!expandedServers[serverId] && !inbounds[serverId]) {
+      fetchInbounds(serverId);
+    }
+  };
+
+  const generateVMessLink = (inbound, server) => {
+    try {
+      const settings = typeof inbound.settings === 'string' ? JSON.parse(inbound.settings) : inbound.settings;
+      const streamSettings = typeof inbound.streamSettings === 'string' ? JSON.parse(inbound.streamSettings) : inbound.streamSettings;
+      
+      const config = {
+        v: '2',
+        ps: inbound.remark || server.name,
+        add: server.host,
+        port: inbound.port,
+        id: settings.clients?.[0]?.id || settings.vmesses?.[0]?.id || '',
+        aid: settings.vmesses?.[0]?.alterId || settings.clients?.[0]?.alterId || 0,
+        net: streamSettings.network || 'tcp',
+        type: 'none',
+        host: '',
+        path: '',
+        tls: streamSettings.security === 'tls' ? 'tls' : ''
+      };
+
+      if (streamSettings.network === 'ws') {
+        config.path = streamSettings.wsSettings?.path || '/';
+        config.host = streamSettings.wsSettings?.headers?.Host || '';
+      } else if (streamSettings.network === 'http') {
+        config.path = streamSettings.httpSettings?.path || '/';
+        config.host = streamSettings.httpSettings?.host?.[0] || '';
+      } else if (streamSettings.network === 'grpc') {
+        config.path = streamSettings.grpcSettings?.serviceName || '';
+      }
+
+      return 'vmess://' + btoa(JSON.stringify(config));
+    } catch (e) {
+      return '';
+    }
+  };
+
+  const generateVLESSLink = (inbound, server) => {
+    try {
+      const settings = typeof inbound.settings === 'string' ? JSON.parse(inbound.settings) : inbound.settings;
+      const streamSettings = typeof inbound.streamSettings === 'string' ? JSON.parse(inbound.streamSettings) : inbound.streamSettings;
+      
+      const uuid = settings.clients?.[0]?.id || settings.vlesses?.[0]?.id || '';
+      let link = `vless://${uuid}@${server.host}:${inbound.port}?`;
+      
+      const params = new URLSearchParams();
+      params.append('type', streamSettings.network || 'tcp');
+      params.append('security', streamSettings.security || 'none');
+      
+      if (streamSettings.security === 'tls' || streamSettings.security === 'xtls') {
+        const tlsSettings = streamSettings.tlsSettings || streamSettings.xtlsSettings;
+        if (tlsSettings?.serverName) {
+          params.append('sni', tlsSettings.serverName);
+        }
+      }
+      
+      if (streamSettings.network === 'ws') {
+        params.append('path', streamSettings.wsSettings?.path || '/');
+        if (streamSettings.wsSettings?.headers?.Host) {
+          params.append('host', streamSettings.wsSettings.headers.Host);
+        }
+      } else if (streamSettings.network === 'grpc') {
+        params.append('serviceName', streamSettings.grpcSettings?.serviceName || '');
+      }
+      
+      if (settings.clients?.[0]?.flow || settings.vlesses?.[0]?.flow) {
+        params.append('flow', settings.clients?.[0]?.flow || settings.vlesses?.[0]?.flow);
+      }
+      
+      link += params.toString();
+      link += `#${encodeURIComponent(inbound.remark || server.name)}`;
+      
+      return link;
+    } catch (e) {
+      return '';
+    }
+  };
+
+  const generateTrojanLink = (inbound, server) => {
+    try {
+      const settings = typeof inbound.settings === 'string' ? JSON.parse(inbound.settings) : inbound.settings;
+      const streamSettings = typeof inbound.streamSettings === 'string' ? JSON.parse(inbound.streamSettings) : inbound.streamSettings;
+      
+      const password = settings.clients?.[0]?.password || '';
+      let link = `trojan://${password}@${server.host}:${inbound.port}?`;
+      
+      const params = new URLSearchParams();
+      params.append('type', streamSettings.network || 'tcp');
+      params.append('security', streamSettings.security || 'tls');
+      
+      if (streamSettings.security === 'tls' || streamSettings.security === 'xtls') {
+        const tlsSettings = streamSettings.tlsSettings || streamSettings.xtlsSettings;
+        if (tlsSettings?.serverName) {
+          params.append('sni', tlsSettings.serverName);
+        }
+      }
+      
+      if (streamSettings.network === 'ws') {
+        params.append('path', streamSettings.wsSettings?.path || '/');
+        if (streamSettings.wsSettings?.headers?.Host) {
+          params.append('host', streamSettings.wsSettings.headers.Host);
+        }
+      } else if (streamSettings.network === 'grpc') {
+        params.append('serviceName', streamSettings.grpcSettings?.serviceName || '');
+      }
+      
+      link += params.toString();
+      link += `#${encodeURIComponent(inbound.remark || server.name)}`;
+      
+      return link;
+    } catch (e) {
+      return '';
+    }
+  };
+
+  const generateLink = (inbound, server) => {
+    switch (inbound.protocol) {
+      case 'vmess':
+        return generateVMessLink(inbound, server);
+      case 'vless':
+        return generateVLESSLink(inbound, server);
+      case 'trojan':
+        return generateTrojanLink(inbound, server);
+      default:
+        return '';
+    }
+  };
+
+  const showQRCodeModal = (inbound, server) => {
+    const link = generateLink(inbound, server);
+    if (link) {
+      setQRCodeData({
+        title: inbound.remark || '入站配置',
+        content: link
+      });
+      setShowQRCode(true);
+    } else {
+      alert('该协议不支持生成链接');
+    }
+  };
+
+  const resetTraffic = async (serverId, inbound) => {
+    if (!window.confirm('确定要重置流量吗？')) return;
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/xui/server/${serverId}/inbounds/${inbound.id}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          ...buildInboundDataFromExisting(inbound),
+          up: 0,
+          down: 0
+        })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        alert('流量重置成功');
+        fetchInbounds(serverId);
+      } else {
+        alert(data.msg || '重置失败');
+      }
+    } catch (error) {
+      alert('重置失败: ' + error.message);
+    }
+  };
+
+  const buildInboundDataFromExisting = (inbound) => {
+    return {
+      remark: inbound.remark,
+      enable: inbound.enable,
+      port: parseInt(inbound.port),
+      protocol: inbound.protocol,
+      listen: inbound.listen || '',
+      settings: inbound.settings,
+      streamSettings: inbound.streamSettings,
+      sniffing: inbound.sniffing,
+      total: inbound.total,
+      expiryTime: inbound.expiryTime
+    };
+  };
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -160,24 +401,46 @@ const XUIManager = () => {
     setEditingInbound(null);
     setInboundForm({
       remark: '',
-      protocol: 'vmess',
-      port: '',
       enable: true,
-      settings: JSON.stringify({
-        clients: [{
-          id: generateUUID(),
-          alterId: 0
-        }],
-        disableInsecure: false
-      }, null, 2),
-      streamSettings: JSON.stringify({
-        network: 'tcp',
-        security: 'none'
-      }, null, 2),
-      sniffing: JSON.stringify({
-        enabled: true,
-        destOverride: ['http', 'tls']
-      }, null, 2)
+      protocol: 'vmess',
+      listen: '',
+      port: '',
+      totalGB: 0,
+      expiryTime: '',
+      id: generateUUID(),
+      alterId: 0,
+      flow: '',
+      password: generateUUID().substring(0, 8),
+      fallbacks: [],
+      method: 'aes-256-gcm',
+      ssPassword: '',
+      address: '',
+      targetPort: '',
+      network: 'tcp,udp',
+      authUser: '',
+      authPass: '',
+      udp: false,
+      ip: '',
+      streamNetwork: 'tcp',
+      security: 'none',
+      serverName: '',
+      certFile: '',
+      keyFile: '',
+      certContent: '',
+      keyContent: '',
+      useCertFile: true,
+      tcpHeaderType: 'none',
+      wsPath: '/',
+      wsHost: '',
+      h2Path: '/',
+      h2Host: '',
+      grpcServiceName: '',
+      kcpSeed: '',
+      kcpType: 'none',
+      quicSecurity: 'none',
+      quicKey: '',
+      quicType: 'none',
+      sniffing: true
     });
     setShowInboundModal(true);
   };
@@ -185,23 +448,228 @@ const XUIManager = () => {
   const openEditInbound = (serverId, inbound) => {
     setCurrentServerId(serverId);
     setEditingInbound(inbound);
+    
+    let settings = {};
+    try {
+      settings = typeof inbound.settings === 'string' ? JSON.parse(inbound.settings) : inbound.settings;
+    } catch (e) {
+      settings = {};
+    }
+    
+    let streamSettings = {};
+    try {
+      streamSettings = typeof inbound.streamSettings === 'string' ? JSON.parse(inbound.streamSettings) : inbound.streamSettings;
+    } catch (e) {
+      streamSettings = {};
+    }
+
+    let sniffingEnabled = true;
+    try {
+      const sniffingObj = typeof inbound.sniffing === 'string' ? JSON.parse(inbound.sniffing) : inbound.sniffing;
+      sniffingEnabled = sniffingObj.enabled !== false;
+    } catch (e) {
+      sniffingEnabled = true;
+    }
+
     setInboundForm({
       remark: inbound.remark || '',
-      protocol: inbound.protocol || 'vmess',
-      port: inbound.port || '',
       enable: inbound.enable,
-      settings: inbound.settings || '{}',
-      streamSettings: inbound.streamSettings || '{}',
-      sniffing: inbound.sniffing || '{}'
+      protocol: inbound.protocol || 'vmess',
+      listen: inbound.listen || '',
+      port: inbound.port || '',
+      totalGB: inbound.total ? Math.round(inbound.total / (1024 * 1024 * 1024)) : 0,
+      expiryTime: inbound.expiryTime ? new Date(inbound.expiryTime).toISOString().slice(0, 16) : '',
+      id: settings.clients?.[0]?.id || settings.vlesses?.[0]?.id || settings.vmesses?.[0]?.id || '',
+      alterId: settings.vmesses?.[0]?.alterId || settings.clients?.[0]?.alterId || 0,
+      flow: settings.vlesses?.[0]?.flow || settings.clients?.[0]?.flow || '',
+      password: settings.clients?.[0]?.password || '',
+      fallbacks: settings.fallbacks || [],
+      method: settings.method || 'aes-256-gcm',
+      ssPassword: settings.password || '',
+      address: settings.address || '',
+      targetPort: settings.port || '',
+      network: settings.network || 'tcp,udp',
+      authUser: settings.accounts?.[0]?.user || '',
+      authPass: settings.accounts?.[0]?.pass || '',
+      udp: settings.udp || false,
+      ip: settings.ip || '',
+      streamNetwork: streamSettings.network || 'tcp',
+      security: streamSettings.security || 'none',
+      serverName: streamSettings.tlsSettings?.serverName || streamSettings.xtlsSettings?.serverName || '',
+      certFile: streamSettings.tlsSettings?.certificates?.[0]?.certificateFile || streamSettings.xtlsSettings?.certificates?.[0]?.certificateFile || '',
+      keyFile: streamSettings.tlsSettings?.certificates?.[0]?.keyFile || streamSettings.xtlsSettings?.certificates?.[0]?.keyFile || '',
+      certContent: streamSettings.tlsSettings?.certificates?.[0]?.certificate || streamSettings.xtlsSettings?.certificates?.[0]?.certificate || '',
+      keyContent: streamSettings.tlsSettings?.certificates?.[0]?.key || streamSettings.xtlsSettings?.certificates?.[0]?.key || '',
+      useCertFile: !!(streamSettings.tlsSettings?.certificates?.[0]?.certificateFile || streamSettings.xtlsSettings?.certificates?.[0]?.certificateFile),
+      tcpHeaderType: streamSettings.tcpSettings?.header?.type || 'none',
+      wsPath: streamSettings.wsSettings?.path || '/',
+      wsHost: streamSettings.wsSettings?.headers?.Host || '',
+      h2Path: streamSettings.httpSettings?.path || '/',
+      h2Host: streamSettings.httpSettings?.host?.[0] || '',
+      grpcServiceName: streamSettings.grpcSettings?.serviceName || '',
+      kcpSeed: streamSettings.kcpSettings?.seed || '',
+      kcpType: streamSettings.kcpSettings?.header?.type || 'none',
+      quicSecurity: streamSettings.quicSettings?.security || 'none',
+      quicKey: streamSettings.quicSettings?.key || '',
+      quicType: streamSettings.quicSettings?.header?.type || 'none',
+      sniffing: sniffingEnabled
     });
+    
     setShowInboundModal(true);
   };
 
-  const generateUUID = () => {
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-      var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
-      return v.toString(16);
-    });
+  const buildInboundData = () => {
+    const form = inboundForm;
+    
+    let settings = {};
+    switch (form.protocol) {
+      case 'vmess':
+        settings = {
+          clients: [{
+            id: form.id,
+            alterId: parseInt(form.alterId) || 0
+          }],
+          disableInsecure: false
+        };
+        break;
+      case 'vless':
+        settings = {
+          clients: [{
+            id: form.id,
+            flow: form.security === 'xtls' ? form.flow : ''
+          }],
+          decryption: 'none',
+          fallbacks: form.fallbacks
+        };
+        break;
+      case 'trojan':
+        settings = {
+          clients: [{
+            password: form.password,
+            flow: form.security === 'xtls' ? form.flow : ''
+          }],
+          fallbacks: form.fallbacks
+        };
+        break;
+      case 'shadowsocks':
+        settings = {
+          method: form.method,
+          password: form.ssPassword,
+          network: form.network
+        };
+        break;
+      case 'dokodemo-door':
+        settings = {
+          address: form.address,
+          port: parseInt(form.targetPort) || 0,
+          network: form.network
+        };
+        break;
+      case 'socks':
+        settings = {
+          auth: form.authUser ? 'password' : 'noauth',
+          accounts: form.authUser ? [{
+            user: form.authUser,
+            pass: form.authPass
+          }] : [],
+          udp: form.udp,
+          ip: form.ip
+        };
+        break;
+      case 'http':
+        settings = {
+          accounts: form.authUser ? [{
+            user: form.authUser,
+            pass: form.authPass
+          }] : []
+        };
+        break;
+    }
+    
+    let streamSettings = {
+      network: form.streamNetwork
+    };
+    
+    switch (form.streamNetwork) {
+      case 'tcp':
+        streamSettings.tcpSettings = {
+          header: { type: form.tcpHeaderType }
+        };
+        break;
+      case 'ws':
+        streamSettings.wsSettings = {
+          path: form.wsPath,
+          headers: form.wsHost ? { Host: form.wsHost } : {}
+        };
+        break;
+      case 'http':
+        streamSettings.httpSettings = {
+          path: form.h2Path,
+          host: form.h2Host ? [form.h2Host] : []
+        };
+        break;
+      case 'grpc':
+        streamSettings.grpcSettings = {
+          serviceName: form.grpcServiceName
+        };
+        break;
+      case 'kcp':
+        streamSettings.kcpSettings = {
+          seed: form.kcpSeed,
+          header: { type: form.kcpType }
+        };
+        break;
+      case 'quic':
+        streamSettings.quicSettings = {
+          security: form.quicSecurity,
+          key: form.quicKey,
+          header: { type: form.quicType }
+        };
+        break;
+    }
+    
+    streamSettings.security = form.security;
+    if (form.security === 'tls') {
+      streamSettings.tlsSettings = {
+        serverName: form.serverName,
+        certificates: [{
+          certificateFile: form.useCertFile ? form.certFile : '',
+          keyFile: form.useCertFile ? form.keyFile : '',
+          certificate: !form.useCertFile ? (form.certContent ? form.certContent.split('\\n') : []) : [],
+          key: !form.useCertFile ? (form.keyContent ? form.keyContent.split('\\n') : []) : []
+        }]
+      };
+    } else if (form.security === 'xtls') {
+      streamSettings.xtlsSettings = {
+        serverName: form.serverName,
+        certificates: [{
+          certificateFile: form.useCertFile ? form.certFile : '',
+          keyFile: form.useCertFile ? form.keyFile : '',
+          certificate: !form.useCertFile ? (form.certContent ? form.certContent.split('\\n') : []) : [],
+          key: !form.useCertFile ? (form.keyContent ? form.keyContent.split('\\n') : []) : []
+        }]
+      };
+    }
+    
+    const sniffing = {
+      enabled: form.sniffing,
+      destOverride: ['http', 'tls']
+    };
+    
+    return {
+      remark: form.remark,
+      enable: form.enable,
+      port: parseInt(form.port),
+      protocol: form.protocol,
+      listen: form.listen,
+      settings: JSON.stringify(settings),
+      streamSettings: JSON.stringify(streamSettings),
+      sniffing: JSON.stringify(sniffing),
+      up: editingInbound?.up || 0,
+      down: editingInbound?.down || 0,
+      total: form.totalGB * 1024 * 1024 * 1024,
+      expiryTime: form.expiryTime ? new Date(form.expiryTime).getTime() : 0
+    };
   };
 
   const saveInbound = async () => {
@@ -215,34 +683,24 @@ const XUIManager = () => {
         ? `${API_BASE_URL}/xui/server/${currentServerId}/inbounds/${editingInbound.id}`
         : `${API_BASE_URL}/xui/server/${currentServerId}/inbounds`;
 
+      const data = buildInboundData();
+
       const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({
-          remark: inboundForm.remark,
-          enable: inboundForm.enable,
-          port: parseInt(inboundForm.port),
-          protocol: inboundForm.protocol,
-          settings: inboundForm.settings,
-          streamSettings: inboundForm.streamSettings,
-          sniffing: inboundForm.sniffing,
-          up: editingInbound?.up || 0,
-          down: editingInbound?.down || 0,
-          total: editingInbound?.total || 0,
-          expiryTime: editingInbound?.expiryTime || 0
-        })
+        body: JSON.stringify(data)
       });
 
-      const data = await response.json();
-      if (data.success) {
+      const result = await response.json();
+      if (result.success) {
         alert(editingInbound ? '修改成功' : '添加成功');
         setShowInboundModal(false);
         fetchInbounds(currentServerId);
       } else {
-        alert(data.msg || '操作失败');
+        alert(result.msg || '操作失败');
       }
     } catch (error) {
       alert('操作失败: ' + error.message);
@@ -412,6 +870,484 @@ const XUIManager = () => {
     );
   };
 
+  // 操作菜单组件
+  const ActionMenu = ({ serverId, inbound, server }) => {
+    const [showMenu, setShowMenu] = useState(false);
+
+    return React.createElement('div', { className: "relative" },
+      React.createElement('button', {
+        onClick: () => setShowMenu(!showMenu),
+        className: "text-blue-600 hover:text-blue-900 px-2 py-1"
+      }, '操作 ▼'),
+      showMenu && React.createElement('div', {
+        className: "absolute right-0 mt-1 w-40 bg-white rounded-lg shadow-lg border z-10",
+        onMouseLeave: () => setShowMenu(false)
+      },
+        React.createElement('div', { className: "py-1" },
+          React.createElement('button', {
+            onClick: () => {
+              setShowMenu(false);
+              showQRCodeModal(inbound, server);
+            },
+            className: "w-full text-left px-4 py-2 text-sm hover:bg-gray-100 flex items-center space-x-2"
+          },
+            React.createElement('span', null, '📱'),
+            React.createElement('span', null, '二维码')
+          ),
+          React.createElement('button', {
+            onClick: () => {
+              setShowMenu(false);
+              openEditInbound(serverId, inbound);
+            },
+            className: "w-full text-left px-4 py-2 text-sm hover:bg-gray-100 flex items-center space-x-2"
+          },
+            React.createElement('span', null, '✏️'),
+            React.createElement('span', null, '编辑')
+          ),
+          React.createElement('button', {
+            onClick: () => {
+              setShowMenu(false);
+              resetTraffic(serverId, inbound);
+            },
+            className: "w-full text-left px-4 py-2 text-sm hover:bg-gray-100 flex items-center space-x-2"
+          },
+            React.createElement('span', null, '🔄'),
+            React.createElement('span', null, '重置流量')
+          ),
+          React.createElement('button', {
+            onClick: () => {
+              setShowMenu(false);
+              deleteInbound(serverId, inbound.id);
+            },
+            className: "w-full text-left px-4 py-2 text-sm hover:bg-gray-100 text-red-600 flex items-center space-x-2"
+          },
+            React.createElement('span', null, '🗑️'),
+            React.createElement('span', null, '删除')
+          )
+        )
+      )
+    );
+  };
+
+  // QR码弹窗
+  const QRCodeModal = () => {
+    if (!showQRCode) return null;
+
+    return React.createElement('div', {
+      className: "fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50",
+      onClick: () => setShowQRCode(false)
+    },
+      React.createElement('div', {
+        className: "bg-white rounded-lg shadow-xl p-6 max-w-md",
+        onClick: (e) => e.stopPropagation()
+      },
+        React.createElement('h3', { className: "text-xl font-bold mb-4" }, qrCodeData.title),
+        React.createElement('div', { className: "bg-white p-4 border rounded mb-4" },
+          React.createElement('div', { 
+            id: "qrcode",
+            className: "flex justify-center"
+          })
+        ),
+        React.createElement('div', { className: "mb-4" },
+          React.createElement('textarea', {
+            value: qrCodeData.content,
+            readOnly: true,
+            className: "w-full px-3 py-2 border rounded text-xs font-mono",
+            rows: 4
+          })
+        ),
+        React.createElement('div', { className: "flex space-x-3" },
+          React.createElement('button', {
+            onClick: () => {
+              navigator.clipboard.writeText(qrCodeData.content);
+              alert('已复制到剪贴板');
+            },
+            className: "flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          }, '复制链接'),
+          React.createElement('button', {
+            onClick: () => setShowQRCode(false),
+            className: "flex-1 px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300"
+          }, '关闭')
+        )
+      )
+    );
+  };
+
+  // 生成二维码
+  useEffect(() => {
+    if (showQRCode && qrCodeData.content) {
+      const qrContainer = document.getElementById('qrcode');
+      if (qrContainer) {
+        qrContainer.innerHTML = '';
+        const qr = document.createElement('canvas');
+        qrContainer.appendChild(qr);
+        
+        // 使用简单的方法生成二维码（需要引入QRCode库）
+        // 这里先用文本显示
+        qrContainer.innerHTML = `<div class="text-center text-sm text-gray-500">扫描二维码导入配置</div>`;
+      }
+    }
+  }, [showQRCode, qrCodeData]);
+
+  // 入站编辑弹窗组件 (与之前相同，这里省略以节省篇幅)
+  const InboundModal = () => {
+    // ... (使用之前提供的InboundModal代码)
+    if (!showInboundModal) return null;
+
+    const form = inboundForm;
+    const updateForm = (updates) => setInboundForm({ ...form, ...updates });
+
+    return React.createElement('div', { 
+      className: "fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4",
+      onClick: (e) => {
+        if (e.target === e.currentTarget) setShowInboundModal(false);
+      }
+    },
+      React.createElement('div', { 
+        className: "bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto",
+        onClick: (e) => e.stopPropagation()
+      },
+        React.createElement('div', { className: "sticky top-0 bg-white border-b px-6 py-4 flex justify-between items-center" },
+          React.createElement('h2', { className: "text-xl font-bold" }, editingInbound ? '修改入站' : '添加入站'),
+          React.createElement('button', {
+            onClick: () => setShowInboundModal(false),
+            className: "text-gray-400 hover:text-gray-600 text-2xl"
+          }, '×')
+        ),
+        
+        React.createElement('div', { className: "p-6 space-y-4" },
+          // 基本信息
+          React.createElement('div', { className: "grid grid-cols-2 gap-4" },
+            React.createElement('div', null,
+              React.createElement('label', { className: "block text-sm font-medium mb-1" }, 'remark :'),
+              React.createElement('input', {
+                type: "text",
+                value: form.remark,
+                onChange: (e) => updateForm({ remark: e.target.value }),
+                className: "w-full px-3 py-2 border rounded-lg"
+              })
+            ),
+            React.createElement('div', { className: "flex items-center" },
+              React.createElement('label', { className: "flex items-center space-x-2 cursor-pointer" },
+                React.createElement('span', { className: "text-sm font-medium" }, 'enable :'),
+                React.createElement('div', {
+                  className: `relative inline-block w-12 h-6 transition duration-200 ease-in-out rounded-full ${form.enable ? 'bg-blue-600' : 'bg-gray-300'}`,
+                  onClick: () => updateForm({ enable: !form.enable })
+                },
+                  React.createElement('span', {
+                    className: `absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform duration-200 ${form.enable ? 'transform translate-x-6' : ''}`
+                  })
+                )
+              )
+            )
+          ),
+
+          React.createElement('div', { className: "grid grid-cols-2 gap-4" },
+            React.createElement('div', null,
+              React.createElement('label', { className: "block text-sm font-medium mb-1" }, 'protocol :'),
+              React.createElement('select', {
+                value: form.protocol,
+                onChange: (e) => updateForm({ protocol: e.target.value }),
+                className: "w-full px-3 py-2 border rounded-lg"
+              },
+                ['vmess', 'vless', 'trojan', 'shadowsocks', 'dokodemo-door', 'socks', 'http'].map(p =>
+                  React.createElement('option', { key: p, value: p }, p)
+                )
+              )
+            ),
+            React.createElement('div', null,
+              React.createElement('label', { className: "block text-sm font-medium mb-1" }, '监听 IP :'),
+              React.createElement('input', {
+                type: "text",
+                value: form.listen,
+                onChange: (e) => updateForm({ listen: e.target.value }),
+                placeholder: "留空为 0.0.0.0",
+                className: "w-full px-3 py-2 border rounded-lg"
+              })
+            )
+          ),
+
+          React.createElement('div', { className: "grid grid-cols-2 gap-4" },
+            React.createElement('div', null,
+              React.createElement('label', { className: "block text-sm font-medium mb-1" }, '端口 :'),
+              React.createElement('input', {
+                type: "number",
+                value: form.port,
+                onChange: (e) => updateForm({ port: e.target.value }),
+                className: "w-full px-3 py-2 border rounded-lg"
+              })
+            ),
+            React.createElement('div', null,
+              React.createElement('label', { className: "block text-sm font-medium mb-1" }, '总流量(GB) :'),
+              React.createElement('input', {
+                type: "number",
+                value: form.totalGB,
+                onChange: (e) => updateForm({ totalGB: e.target.value }),
+                placeholder: "0 表示不限制",
+                className: "w-full px-3 py-2 border rounded-lg"
+              })
+            )
+          ),
+
+          React.createElement('div', null,
+            React.createElement('label', { className: "block text-sm font-medium mb-1" }, '到期时间 :'),
+            React.createElement('input', {
+              type: "datetime-local",
+              value: form.expiryTime,
+              onChange: (e) => updateForm({ expiryTime: e.target.value }),
+              className: "w-full px-3 py-2 border rounded-lg"
+            })
+          ),
+
+          // 协议特定设置
+          (form.protocol === 'vmess' || form.protocol === 'vless') && React.createElement('div', { className: "space-y-4 border-t pt-4" },
+            React.createElement('h3', { className: "font-semibold" }, form.protocol.toUpperCase() + ' 设置'),
+            React.createElement('div', null,
+              React.createElement('label', { className: "block text-sm font-medium mb-1" }, 'id (UUID) :'),
+              React.createElement('input', {
+                type: "text",
+                value: form.id,
+                onChange: (e) => updateForm({ id: e.target.value }),
+                className: "w-full px-3 py-2 border rounded-lg font-mono text-sm"
+              })
+            ),
+            form.protocol === 'vmess' && React.createElement('div', null,
+              React.createElement('label', { className: "block text-sm font-medium mb-1" }, 'alterId :'),
+              React.createElement('input', {
+                type: "number",
+                value: form.alterId,
+                onChange: (e) => updateForm({ alterId: e.target.value }),
+                className: "w-full px-3 py-2 border rounded-lg"
+              })
+            ),
+            form.protocol === 'vless' && form.security === 'xtls' && React.createElement('div', null,
+              React.createElement('label', { className: "block text-sm font-medium mb-1" }, 'flow :'),
+              React.createElement('select', {
+                value: form.flow,
+                onChange: (e) => updateForm({ flow: e.target.value }),
+                className: "w-full px-3 py-2 border rounded-lg"
+              },
+                ['', 'xtls-rprx-direct', 'xtls-rprx-splice'].map(f =>
+                  React.createElement('option', { key: f, value: f }, f || '无')
+                )
+              )
+            )
+          ),
+
+          form.protocol === 'trojan' && React.createElement('div', { className: "space-y-4 border-t pt-4" },
+            React.createElement('h3', { className: "font-semibold" }, 'Trojan 设置'),
+            React.createElement('div', null,
+              React.createElement('label', { className: "block text-sm font-medium mb-1" }, '密码 :'),
+              React.createElement('input', {
+                type: "text",
+                value: form.password,
+                onChange: (e) => updateForm({ password: e.target.value }),
+                className: "w-full px-3 py-2 border rounded-lg"
+              })
+            ),
+            form.security === 'xtls' && React.createElement('div', null,
+              React.createElement('label', { className: "block text-sm font-medium mb-1" }, 'flow :'),
+              React.createElement('select', {
+                value: form.flow,
+                onChange: (e) => updateForm({ flow: e.target.value }),
+                className: "w-full px-3 py-2 border rounded-lg"
+              },
+                ['', 'xtls-rprx-direct', 'xtls-rprx-splice'].map(f =>
+                  React.createElement('option', { key: f, value: f }, f || '无')
+                )
+              )
+            )
+          ),
+
+          form.protocol === 'shadowsocks' && React.createElement('div', { className: "space-y-4 border-t pt-4" },
+            React.createElement('h3', { className: "font-semibold" }, 'Shadowsocks 设置'),
+            React.createElement('div', { className: "grid grid-cols-2 gap-4" },
+              React.createElement('div', null,
+                React.createElement('label', { className: "block text-sm font-medium mb-1" }, '加密方式 :'),
+                React.createElement('select', {
+                  value: form.method,
+                  onChange: (e) => updateForm({ method: e.target.value }),
+                  className: "w-full px-3 py-2 border rounded-lg"
+                },
+                  ['aes-256-gcm', 'aes-128-gcm', 'chacha20-poly1305', 'chacha20-ietf-poly1305'].map(m =>
+                    React.createElement('option', { key: m, value: m }, m)
+                  )
+                )
+              ),
+              React.createElement('div', null,
+                React.createElement('label', { className: "block text-sm font-medium mb-1" }, '密码 :'),
+                React.createElement('input', {
+                  type: "text",
+                  value: form.ssPassword,
+                  onChange: (e) => updateForm({ ssPassword: e.target.value }),
+                  className: "w-full px-3 py-2 border rounded-lg"
+                })
+              )
+            )
+          ),
+
+          // 传输设置
+          React.createElement('div', { className: "space-y-4 border-t pt-4" },
+            React.createElement('h3', { className: "font-semibold" }, '传输设置'),
+            React.createElement('div', { className: "grid grid-cols-2 gap-4" },
+              React.createElement('div', null,
+                React.createElement('label', { className: "block text-sm font-medium mb-1" }, '传输协议 :'),
+                React.createElement('select', {
+                  value: form.streamNetwork,
+                  onChange: (e) => updateForm({ streamNetwork: e.target.value }),
+                  className: "w-full px-3 py-2 border rounded-lg"
+                },
+                  ['tcp', 'kcp', 'ws', 'http', 'quic', 'grpc'].map(n =>
+                    React.createElement('option', { key: n, value: n }, n)
+                  )
+                )
+              ),
+              React.createElement('div', null,
+                React.createElement('label', { className: "block text-sm font-medium mb-1" }, '安全类型 :'),
+                React.createElement('select', {
+                  value: form.security,
+                  onChange: (e) => updateForm({ security: e.target.value }),
+                  className: "w-full px-3 py-2 border rounded-lg"
+                },
+                  ['none', 'tls', 'xtls'].map(s =>
+                    React.createElement('option', { key: s, value: s }, s)
+                  )
+                )
+              )
+            ),
+
+            // WebSocket 设置
+            form.streamNetwork === 'ws' && React.createElement('div', { className: "grid grid-cols-2 gap-4" },
+              React.createElement('div', null,
+                React.createElement('label', { className: "block text-sm font-medium mb-1" }, 'path :'),
+                React.createElement('input', {
+                  type: "text",
+                  value: form.wsPath,
+                  onChange: (e) => updateForm({ wsPath: e.target.value }),
+                  className: "w-full px-3 py-2 border rounded-lg"
+                })
+              ),
+              React.createElement('div', null,
+                React.createElement('label', { className: "block text-sm font-medium mb-1" }, 'host :'),
+                React.createElement('input', {
+                  type: "text",
+                  value: form.wsHost,
+                  onChange: (e) => updateForm({ wsHost: e.target.value }),
+                  className: "w-full px-3 py-2 border rounded-lg"
+                })
+              )
+            ),
+
+            // GRPC 设置
+            form.streamNetwork === 'grpc' && React.createElement('div', null,
+              React.createElement('label', { className: "block text-sm font-medium mb-1" }, 'serviceName :'),
+              React.createElement('input', {
+                type: "text",
+                value: form.grpcServiceName,
+                onChange: (e) => updateForm({ grpcServiceName: e.target.value }),
+                className: "w-full px-3 py-2 border rounded-lg"
+              })
+            ),
+
+            // TLS/XTLS 设置
+            (form.security === 'tls' || form.security === 'xtls') && React.createElement('div', { className: "space-y-4 border-t pt-4" },
+              React.createElement('h3', { className: "font-semibold" }, (form.security === 'tls' ? 'TLS' : 'XTLS') + ' 设置'),
+              React.createElement('div', null,
+                React.createElement('label', { className: "block text-sm font-medium mb-1" }, '域名 :'),
+                React.createElement('input', {
+                  type: "text",
+                  value: form.serverName,
+                  onChange: (e) => updateForm({ serverName: e.target.value }),
+                  className: "w-full px-3 py-2 border rounded-lg"
+                })
+              ),
+              React.createElement('div', { className: "flex space-x-2 mb-2" },
+                React.createElement('button', {
+                  type: "button",
+                  onClick: () => updateForm({ useCertFile: true }),
+                  className: `flex-1 px-4 py-2 rounded-lg ${form.useCertFile ? 'bg-blue-600 text-white' : 'bg-gray-200'}`
+                }, 'certificate file path'),
+                React.createElement('button', {
+                  type: "button",
+                  onClick: () => updateForm({ useCertFile: false }),
+                  className: `flex-1 px-4 py-2 rounded-lg ${!form.useCertFile ? 'bg-blue-600 text-white' : 'bg-gray-200'}`
+                }, 'certificate file content')
+              ),
+              form.useCertFile ? React.createElement('div', { className: "space-y-4" },
+                React.createElement('div', null,
+                  React.createElement('label', { className: "block text-sm font-medium mb-1" }, '公钥文件路径 :'),
+                  React.createElement('input', {
+                    type: "text",
+                    value: form.certFile,
+                    onChange: (e) => updateForm({ certFile: e.target.value }),
+                    placeholder: "/path/to/cert.crt",
+                    className: "w-full px-3 py-2 border rounded-lg"
+                  })
+                ),
+                React.createElement('div', null,
+                  React.createElement('label', { className: "block text-sm font-medium mb-1" }, '密钥文件路径 :'),
+                  React.createElement('input', {
+                    type: "text",
+                    value: form.keyFile,
+                    onChange: (e) => updateForm({ keyFile: e.target.value }),
+                    placeholder: "/path/to/key.key",
+                    className: "w-full px-3 py-2 border rounded-lg"
+                  })
+                )
+              ) : React.createElement('div', { className: "space-y-4" },
+                React.createElement('div', null,
+                  React.createElement('label', { className: "block text-sm font-medium mb-1" }, '公钥内容 :'),
+                  React.createElement('textarea', {
+                    value: form.certContent,
+                    onChange: (e) => updateForm({ certContent: e.target.value }),
+                    rows: 4,
+                    className: "w-full px-3 py-2 border rounded-lg font-mono text-xs"
+                  })
+                ),
+                React.createElement('div', null,
+                  React.createElement('label', { className: "block text-sm font-medium mb-1" }, '密钥内容 :'),
+                  React.createElement('textarea', {
+                    value: form.keyContent,
+                    onChange: (e) => updateForm({ keyContent: e.target.value }),
+                    rows: 4,
+                    className: "w-full px-3 py-2 border rounded-lg font-mono text-xs"
+                  })
+                )
+              )
+            )
+          ),
+
+          // Sniffing
+          React.createElement('div', { className: "flex items-center space-x-2 border-t pt-4" },
+            React.createElement('span', { className: "text-sm font-medium" }, 'sniffing :'),
+            React.createElement('div', {
+              className: `relative inline-block w-12 h-6 transition duration-200 ease-in-out rounded-full ${form.sniffing ? 'bg-blue-600' : 'bg-gray-300'}`,
+              onClick: () => updateForm({ sniffing: !form.sniffing })
+            },
+              React.createElement('span', {
+                className: `absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform duration-200 ${form.sniffing ? 'transform translate-x-6' : ''}`
+              })
+            )
+          )
+        ),
+
+        // 按钮
+        React.createElement('div', { className: "sticky bottom-0 bg-white border-t px-6 py-4 flex justify-end space-x-3" },
+          React.createElement('button', {
+            type: "button",
+            onClick: () => setShowInboundModal(false),
+            className: "px-6 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300"
+          }, 'close'),
+          React.createElement('button', {
+            type: "button",
+            onClick: saveInbound,
+            className: "px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          }, editingInbound ? '修改' : '添加')
+        )
+      )
+    );
+  };
+
   return React.createElement('div', { className: "min-h-screen bg-gray-50" },
     React.createElement('div', { className: "bg-white shadow" },
       React.createElement('div', { className: "max-w-7xl mx-auto px-4 py-4" },
@@ -451,71 +1387,105 @@ const XUIManager = () => {
           }, '添加第一台服务器')
         )
       ),
-      activeTab === 'inbounds' && React.createElement('div', { className: "space-y-6" },
+      
+      // 入站配置 - 手风琴式展开/收起
+      activeTab === 'inbounds' && React.createElement('div', { className: "space-y-4" },
         servers.map(server => {
           const serverInbounds = inbounds[server.id] || [];
+          const isExpanded = expandedServers[server.id];
           const isLoading = loading[`inbound_${server.id}`];
+          
           return React.createElement('div', { key: server.id, className: "bg-white rounded-lg shadow-md overflow-hidden" },
-            React.createElement('div', { className: "bg-gray-50 px-6 py-4 border-b" },
+            // 服务器标题栏 - 可点击展开/收起
+            React.createElement('div', { 
+              className: "bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-4 border-b cursor-pointer hover:bg-gray-100 transition",
+              onClick: () => toggleServer(server.id)
+            },
               React.createElement('div', { className: "flex justify-between items-center" },
-                React.createElement('h3', { className: "text-lg font-semibold text-gray-900" }, server.name),
-                React.createElement('div', { className: "flex space-x-2" },
-                  React.createElement('button', {
-                    onClick: () => openAddInbound(server.id),
-                    className: "px-3 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700"
-                  }, '添加入站'),
-                  React.createElement('button', {
-                    onClick: () => fetchInbounds(server.id),
-                    disabled: isLoading,
-                    className: "text-sm text-blue-600 hover:text-blue-700 disabled:text-gray-400"
-                  }, isLoading ? '加载中...' : '刷新')
-                )
-              )
-            ),
-            serverInbounds.length > 0 ? React.createElement('div', { className: "overflow-x-auto" },
-              React.createElement('table', { className: "min-w-full divide-y divide-gray-200" },
-                React.createElement('thead', { className: "bg-gray-50" },
-                  React.createElement('tr', null,
-                    ['备注', '协议', '端口', '状态', '上传', '下载', '操作'].map(h =>
-                      React.createElement('th', { key: h, className: "px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase" }, h)
-                    )
+                React.createElement('div', { className: "flex items-center space-x-3" },
+                  React.createElement('span', { className: "text-xl" }, isExpanded ? '▼' : '▶'),
+                  React.createElement('h3', { className: "text-lg font-semibold text-gray-900" }, server.name),
+                  React.createElement('span', { className: "text-sm text-gray-500" }, 
+                    `(${serverInbounds.length} 个入站)`
                   )
                 ),
-                React.createElement('tbody', { className: "bg-white divide-y divide-gray-200" },
-                  serverInbounds.map(inbound =>
-                    React.createElement('tr', { key: inbound.id },
-                      React.createElement('td', { className: "px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900" }, inbound.remark || '-'),
-                      React.createElement('td', { className: "px-6 py-4 whitespace-nowrap text-sm" },
-                        React.createElement('span', { className: "px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs font-medium" }, inbound.protocol)
-                      ),
-                      React.createElement('td', { className: "px-6 py-4 whitespace-nowrap text-sm text-gray-500" }, inbound.port),
-                      React.createElement('td', { className: "px-6 py-4 whitespace-nowrap" },
-                        React.createElement('span', {
-                          className: `px-2 py-1 rounded text-xs font-medium ${inbound.enable ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`
-                        }, inbound.enable ? '启用' : '禁用')
-                      ),
-                      React.createElement('td', { className: "px-6 py-4 whitespace-nowrap text-sm text-gray-500" }, formatBytes(inbound.up)),
-                      React.createElement('td', { className: "px-6 py-4 whitespace-nowrap text-sm text-gray-500" }, formatBytes(inbound.down)),
-                      React.createElement('td', { className: "px-6 py-4 whitespace-nowrap text-sm space-x-2" },
-                        React.createElement('button', {
-                          onClick: () => openEditInbound(server.id, inbound),
-                          className: "text-blue-600 hover:text-blue-900"
-                        }, '编辑'),
-                        React.createElement('button', {
-                          onClick: () => deleteInbound(server.id, inbound.id),
-                          className: "text-red-600 hover:text-red-900"
-                        }, '删除')
+                React.createElement('button', {
+                  onClick: (e) => {
+                    e.stopPropagation();
+                    openAddInbound(server.id);
+                  },
+                  className: "px-3 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700"
+                }, '+ 添加入站')
+              )
+            ),
+            
+            // 入站列表 - 展开时显示
+            isExpanded && React.createElement('div', null,
+              isLoading ? React.createElement('div', { className: "text-center py-8" },
+                React.createElement('span', { className: "text-gray-500" }, '加载中...')
+              ) : serverInbounds.length > 0 ? React.createElement('div', { className: "overflow-x-auto" },
+                React.createElement('table', { className: "min-w-full divide-y divide-gray-200" },
+                  React.createElement('thead', { className: "bg-gray-50" },
+                    React.createElement('tr', null,
+                      ['操作', '启用', 'ID', '备注', '协议', '端口', '上传 / 下载', '总用量', '到期时间'].map(h =>
+                        React.createElement('th', { key: h, className: "px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" }, h)
+                      )
+                    )
+                  ),
+                  React.createElement('tbody', { className: "bg-white divide-y divide-gray-200" },
+                    serverInbounds.map(inbound =>
+                      React.createElement('tr', { key: inbound.id, className: "hover:bg-gray-50" },
+                        React.createElement('td', { className: "px-6 py-4 whitespace-nowrap text-sm" },
+                          React.createElement(ActionMenu, { serverId: server.id, inbound: inbound, server: server })
+                        ),
+                        React.createElement('td', { className: "px-6 py-4 whitespace-nowrap" },
+                          React.createElement('div', {
+                            className: `relative inline-block w-10 h-5 transition duration-200 ease-in-out rounded-full ${inbound.enable ? 'bg-blue-600' : 'bg-gray-300'}`
+                          },
+                            React.createElement('span', {
+                              className: `absolute left-1 top-0.5 bg-white w-4 h-4 rounded-full transition-transform duration-200 ${inbound.enable ? 'transform translate-x-5' : ''}`
+                            })
+                          )
+                        ),
+                        React.createElement('td', { className: "px-6 py-4 whitespace-nowrap text-sm text-gray-500" }, inbound.id),
+                        React.createElement('td', { className: "px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900" }, inbound.remark || '-'),
+                        React.createElement('td', { className: "px-6 py-4 whitespace-nowrap text-sm" },
+                          React.createElement('span', { className: "px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs font-medium" }, inbound.protocol)
+                        ),
+                        React.createElement('td', { className: "px-6 py-4 whitespace-nowrap text-sm text-gray-500" }, inbound.port),
+                        React.createElement('td', { className: "px-6 py-4 whitespace-nowrap text-sm" },
+                          React.createElement('div', { className: "text-green-600" }, formatBytes(inbound.up)),
+                          React.createElement('div', { className: "text-blue-600" }, formatBytes(inbound.down))
+                        ),
+                        React.createElement('td', { className: "px-6 py-4 whitespace-nowrap text-sm" },
+                          inbound.total > 0 
+                            ? React.createElement('span', { 
+                                className: `px-2 py-1 rounded text-xs font-medium ${
+                                  (inbound.up + inbound.down) >= inbound.total ? 'bg-red-100 text-red-800' : 'bg-cyan-100 text-cyan-800'
+                                }`
+                              }, formatBytes(inbound.total))
+                            : React.createElement('span', { className: "px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-medium" }, '无限制')
+                        ),
+                        React.createElement('td', { className: "px-6 py-4 whitespace-nowrap text-sm" },
+                          inbound.expiryTime > 0 
+                            ? React.createElement('span', {
+                                className: `px-2 py-1 rounded text-xs font-medium ${
+                                  inbound.expiryTime < Date.now() ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'
+                                }`
+                              }, new Date(inbound.expiryTime).toLocaleString('zh-CN'))
+                            : React.createElement('span', { className: "px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-medium" }, '无限期')
+                        )
                       )
                     )
                   )
                 )
+              ) : React.createElement('div', { className: "text-center py-8" },
+                React.createElement('p', { className: "text-gray-500 mb-4" }, '暂无入站配置'),
+                React.createElement('button', {
+                  onClick: () => openAddInbound(server.id),
+                  className: "px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                }, '添加第一个入站')
               )
-            ) : React.createElement('div', { className: "text-center py-8" },
-              React.createElement('button', {
-                onClick: () => fetchInbounds(server.id),
-                disabled: isLoading,
-                className: "px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400"
-              }, isLoading ? '加载中...' : '加载入站配置')
             )
           );
         }),
@@ -523,6 +1493,7 @@ const XUIManager = () => {
           React.createElement('p', { className: "text-gray-500" }, '请先添加服务器')
         )
       ),
+      
       activeTab === 'servers' && React.createElement('div', { className: "bg-white rounded-lg shadow-md overflow-hidden" },
         React.createElement('table', { className: "min-w-full divide-y divide-gray-200" },
           React.createElement('thead', { className: "bg-gray-50" },
@@ -594,104 +1565,8 @@ const XUIManager = () => {
         )
       )
     ),
-    showInboundModal && React.createElement('div', { className: "fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto" },
-      React.createElement('div', { className: "bg-white rounded-lg shadow-xl p-6 w-full max-w-2xl m-4" },
-        React.createElement('h2', { className: "text-xl font-bold mb-4" }, editingInbound ? '编辑入站' : '添加入站'),
-        React.createElement('div', { className: "space-y-4 max-h-[70vh] overflow-y-auto" },
-          React.createElement('div', { className: "grid grid-cols-2 gap-4" },
-            React.createElement('div', null,
-              React.createElement('label', { className: "block text-sm font-medium text-gray-700 mb-1" }, '备注'),
-              React.createElement('input', {
-                type: "text",
-                value: inboundForm.remark,
-                onChange: (e) => setInboundForm({ ...inboundForm, remark: e.target.value }),
-                className: "w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-              })
-            ),
-            React.createElement('div', null,
-              React.createElement('label', { className: "block text-sm font-medium text-gray-700 mb-1" }, '端口'),
-              React.createElement('input', {
-                type: "number",
-                value: inboundForm.port,
-                onChange: (e) => setInboundForm({ ...inboundForm, port: e.target.value }),
-                className: "w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-              })
-            )
-          ),
-          React.createElement('div', { className: "grid grid-cols-2 gap-4" },
-            React.createElement('div', null,
-              React.createElement('label', { className: "block text-sm font-medium text-gray-700 mb-1" }, '协议'),
-              React.createElement('select', {
-                value: inboundForm.protocol,
-                onChange: (e) => setInboundForm({ ...inboundForm, protocol: e.target.value }),
-                className: "w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-              },
-                ['vmess', 'vless', 'trojan', 'shadowsocks', 'dokodemo-door', 'socks', 'http'].map(p =>
-                  React.createElement('option', { key: p, value: p }, p)
-                )
-              )
-            ),
-            React.createElement('div', { className: "flex items-center" },
-              React.createElement('label', { className: "flex items-center space-x-2 cursor-pointer" },
-                React.createElement('input', {
-                  type: "checkbox",
-                  checked: inboundForm.enable,
-                  onChange: (e) => setInboundForm({ ...inboundForm, enable: e.target.checked }),
-                  className: "w-4 h-4 text-blue-600"
-                }),
-                React.createElement('span', { className: "text-sm font-medium text-gray-700" }, '启用')
-              )
-            )
-          ),
-          React.createElement('div', null,
-            React.createElement('label', { className: "block text-sm font-medium text-gray-700 mb-1" }, 
-              'Settings (JSON)',
-              React.createElement('span', { className: "text-xs text-gray-500 ml-2" }, '协议配置')
-            ),
-            React.createElement('textarea', {
-              value: inboundForm.settings,
-              onChange: (e) => setInboundForm({ ...inboundForm, settings: e.target.value }),
-              className: "w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 font-mono text-xs",
-              rows: 6
-            })
-          ),
-          React.createElement('div', null,
-            React.createElement('label', { className: "block text-sm font-medium text-gray-700 mb-1" }, 
-              'Stream Settings (JSON)',
-              React.createElement('span', { className: "text-xs text-gray-500 ml-2" }, '传输配置')
-            ),
-            React.createElement('textarea', {
-              value: inboundForm.streamSettings,
-              onChange: (e) => setInboundForm({ ...inboundForm, streamSettings: e.target.value }),
-              className: "w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 font-mono text-xs",
-              rows: 6
-            })
-          ),
-          React.createElement('div', null,
-            React.createElement('label', { className: "block text-sm font-medium text-gray-700 mb-1" }, 
-              'Sniffing (JSON)',
-              React.createElement('span', { className: "text-xs text-gray-500 ml-2" }, '流量探测')
-            ),
-            React.createElement('textarea', {
-              value: inboundForm.sniffing,
-              onChange: (e) => setInboundForm({ ...inboundForm, sniffing: e.target.value }),
-              className: "w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 font-mono text-xs",
-              rows: 3
-            })
-          )
-        ),
-        React.createElement('div', { className: "flex space-x-3 mt-6" },
-          React.createElement('button', {
-            onClick: saveInbound,
-            className: "flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-          }, editingInbound ? '保存' : '添加'),
-          React.createElement('button', {
-            onClick: () => setShowInboundModal(false),
-            className: "flex-1 px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300"
-          }, '取消')
-        )
-      )
-    )
+    React.createElement(InboundModal),
+    React.createElement(QRCodeModal)
   );
 };
 
