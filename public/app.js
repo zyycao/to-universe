@@ -126,6 +126,7 @@ const XUIManager = () => {
   };
 
   const fetchInbounds = async (serverId) => {
+    setLoading(prev => ({ ...prev, [`inbound_${serverId}`]: true }));
     try {
       const response = await fetch(`${API_BASE_URL}/xui/server/${serverId}/inbounds`, {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -136,6 +137,9 @@ const XUIManager = () => {
       }
     } catch (error) {
       console.error('获取入站配置失败:', error);
+      alert('获取入站配置失败: ' + error.message);
+    } finally {
+      setLoading(prev => ({ ...prev, [`inbound_${serverId}`]: false }));
     }
   };
 
@@ -319,6 +323,96 @@ const XUIManager = () => {
             onClick: () => setShowAddServer(true),
             className: "px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
           }, '添加第一台服务器')
+        )
+      ),
+      activeTab === 'inbounds' && React.createElement('div', { className: "space-y-6" },
+        servers.map(server => {
+          const serverInbounds = inbounds[server.id] || [];
+          const isLoading = loading[`inbound_${server.id}`];
+          return React.createElement('div', { key: server.id, className: "bg-white rounded-lg shadow-md overflow-hidden" },
+            React.createElement('div', { className: "bg-gray-50 px-6 py-4 border-b" },
+              React.createElement('div', { className: "flex justify-between items-center" },
+                React.createElement('h3', { className: "text-lg font-semibold text-gray-900" }, server.name),
+                React.createElement('button', {
+                  onClick: () => fetchInbounds(server.id),
+                  disabled: isLoading,
+                  className: "text-sm text-blue-600 hover:text-blue-700 disabled:text-gray-400"
+                }, isLoading ? '加载中...' : '刷新')
+              )
+            ),
+            serverInbounds.length > 0 ? React.createElement('div', { className: "overflow-x-auto" },
+              React.createElement('table', { className: "min-w-full divide-y divide-gray-200" },
+                React.createElement('thead', { className: "bg-gray-50" },
+                  React.createElement('tr', null,
+                    ['备注', '协议', '端口', '状态', '上传', '下载'].map(h =>
+                      React.createElement('th', { key: h, className: "px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase" }, h)
+                    )
+                  )
+                ),
+                React.createElement('tbody', { className: "bg-white divide-y divide-gray-200" },
+                  serverInbounds.map(inbound =>
+                    React.createElement('tr', { key: inbound.id },
+                      React.createElement('td', { className: "px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900" }, inbound.remark || '-'),
+                      React.createElement('td', { className: "px-6 py-4 whitespace-nowrap text-sm" },
+                        React.createElement('span', { className: "px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs font-medium" }, inbound.protocol)
+                      ),
+                      React.createElement('td', { className: "px-6 py-4 whitespace-nowrap text-sm text-gray-500" }, inbound.port),
+                      React.createElement('td', { className: "px-6 py-4 whitespace-nowrap" },
+                        React.createElement('span', {
+                          className: `px-2 py-1 rounded text-xs font-medium ${inbound.enable ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`
+                        }, inbound.enable ? '启用' : '禁用')
+                      ),
+                      React.createElement('td', { className: "px-6 py-4 whitespace-nowrap text-sm text-gray-500" }, formatBytes(inbound.up)),
+                      React.createElement('td', { className: "px-6 py-4 whitespace-nowrap text-sm text-gray-500" }, formatBytes(inbound.down))
+                    )
+                  )
+                )
+              )
+            ) : React.createElement('div', { className: "text-center py-8" },
+              React.createElement('button', {
+                onClick: () => fetchInbounds(server.id),
+                disabled: isLoading,
+                className: "px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400"
+              }, isLoading ? '加载中...' : '加载入站配置')
+            )
+          );
+        }),
+        servers.length === 0 && React.createElement('div', { className: "text-center py-12 bg-white rounded-lg shadow-md" },
+          React.createElement('p', { className: "text-gray-500" }, '请先添加服务器')
+        )
+      ),
+      activeTab === 'servers' && React.createElement('div', { className: "bg-white rounded-lg shadow-md overflow-hidden" },
+        React.createElement('table', { className: "min-w-full divide-y divide-gray-200" },
+          React.createElement('thead', { className: "bg-gray-50" },
+            React.createElement('tr', null,
+              ['名称', '地址', '端口', '用户名', '操作'].map(h =>
+                React.createElement('th', { key: h, className: "px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase" }, h)
+              )
+            )
+          ),
+          React.createElement('tbody', { className: "bg-white divide-y divide-gray-200" },
+            servers.map(server =>
+              React.createElement('tr', { key: server.id },
+                React.createElement('td', { className: "px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900" }, server.name),
+                React.createElement('td', { className: "px-6 py-4 whitespace-nowrap text-sm text-gray-500" }, server.host),
+                React.createElement('td', { className: "px-6 py-4 whitespace-nowrap text-sm text-gray-500" }, server.port),
+                React.createElement('td', { className: "px-6 py-4 whitespace-nowrap text-sm text-gray-500" }, server.username),
+                React.createElement('td', { className: "px-6 py-4 whitespace-nowrap text-sm space-x-2" },
+                  React.createElement('button', {
+                    onClick: () => window.open(`http://${server.host}:${server.port}${server.web_base_path || ''}`, '_blank'),
+                    className: "text-blue-600 hover:text-blue-900"
+                  }, '打开面板'),
+                  React.createElement('button', {
+                    onClick: () => deleteServer(server.id),
+                    className: "text-red-600 hover:text-red-900"
+                  }, '删除')
+                )
+              )
+            )
+          )
+        ),
+        servers.length === 0 && React.createElement('div', { className: "text-center py-12" },
+          React.createElement('p', { className: "text-gray-500" }, '还没有添加服务器')
         )
       )
     ),
